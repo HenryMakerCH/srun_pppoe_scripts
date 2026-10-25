@@ -2,6 +2,8 @@
 
 不启动 `网络准入认证客户端`（Electron 那套 260MB 的程序），一个 PowerShell 脚本完成同样的 PPPoE 拨号。
 
+提供linux版本，参见/linux文件夹
+
 逆向来源：`srun4-portal-pppoe` 的 `resources/SrunClientEncryptAccount.dll` + `resources/app.asar → electron-preload.js`。
 逻辑是从官方 DLL 直接调参反推出来的，不是猜的。
 
