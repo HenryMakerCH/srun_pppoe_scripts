@@ -14,11 +14,11 @@
 ```powershell
 cd D:\hermes\srun-pppoe
 
-.\srun.cmd                      # 不带参数 = help
-.\srun.cmd help                 # 完整帮助
-.\srun.cmd status               # 状态 + IPv4/IPv6 + 客户端是否在跑
-.\srun.cmd dial                 # 用记住的账号拨号（首次会问账号密码）
-.\srun.cmd disconnect           # 断开
+.\srun.ps1                      # 不带参数 = help
+.\srun.ps1 help                 # 完整帮助
+.\srun.ps1 status               # 状态 + IPv4/IPv6 + 客户端是否在跑
+.\srun.ps1 dial                 # 用记住的账号拨号（首次会问账号密码）
+.\srun.ps1 disconnect           # 断开
 ```
 
 参数（全小写；PowerShell 本身大小写不敏感）：
@@ -37,16 +37,16 @@ cd D:\hermes\srun-pppoe
 | `-at <unix秒>` | 调试用，按指定时刻编码账号 |
 
 ```powershell
-.\srun.cmd dial -user 20240001                                  # 学生段
-.\srun.cmd dial -user 20240001 -domain teacher                   # 教师段
-.\srun.cmd dial -user 20240001 -killclient -passfromclientlog    # 日常用这个
-.\srun.cmd dial -dry                                             # 先看要发什么再真拨
+.\srun.ps1 dial -user 20240001                                  # 学生段
+.\srun.ps1 dial -user 20240001 -domain teacher                   # 教师段
+.\srun.ps1 dial -user 20240001 -killclient -passfromclientlog    # 日常用这个
+.\srun.ps1 dial -dry                                             # 先看要发什么再真拨
 ```
 
 密码也可放环境变量，避免出现在命令行历史：
 
 ```powershell
-$env:SRUN_PASS = '你的密码'; .\srun.cmd dial -user 20240001
+$env:SRUN_PASS = '你的密码'; .\srun.ps1 dial -user 20240001
 ```
 
 优先级：`-pass` > `-passfromclientlog` > `$env:SRUN_PASS` > 交互输入。
