@@ -1,0 +1,18 @@
+[Unit]
+Description=Srun PPPoE dialer
+Documentation=file:/usr/local/bin/srun.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 账号密码不写在 unit 里：
+#   /etc/srun/account  -> 学号（可选，也可用 -u）
+#   /etc/srun/passwd   -> 密码，chmod 600
+ExecStart=/usr/local/bin/srun.sh dial -i eth0 -n srun
+ExecStop=/usr/local/bin/srun.sh down
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
