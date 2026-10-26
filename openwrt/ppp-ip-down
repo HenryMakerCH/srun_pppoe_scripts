@@ -1,0 +1,12 @@
+#!/bin/sh
+# /etc/ppp/ip-down —— srun 断开时调用
+#
+# 这里【不清空】/tmp/resolv.conf.d/resolv.conf.auto。
+# 原因：重启/重拨时，旧会话的 ip-down 有可能在新会话的 ip-up 之后才执行，
+# 清空会把刚写好的上游 DNS 又擦掉，dnsmasq 就返回 REFUSED —— 客户端表现
+# 就是"连上了但找不到 DNS 地址 / 无法访问互联网"。保留上一次的上游地址无害，
+# 重连后 ip-up 会覆盖它。
+
+logger -t srun-ipup "down $1（保留上游 DNS，不清空）"
+exit 0
+

@@ -1,0 +1,18 @@
+#!/bin/sh
+# /etc/ppp/ip-up —— srun.sh 启动的 pppd 连上后调用
+# 参数: $1=接口 $2=tty $3=速度 $4=本端IP $5=对端IP $6=ipparam
+# usepeerdns 会把服务器下发的 DNS 放进 $DNS1/$DNS2
+
+[ -d /tmp/resolv.conf.d ] || mkdir -p /tmp/resolv.conf.d
+{
+	echo "# srun pppoe $(date '+%F %T')"
+	[ -n "${DNS1:-}" ] && echo "nameserver $DNS1"
+	[ -n "${DNS2:-}" ] && echo "nameserver $DNS2"
+} > /tmp/resolv.conf.d/resolv.conf.auto
+
+# 告诉 srun.sh「这次认证成功了」（它靠这个标记判断要不要继续扫时间偏差）
+touch /tmp/srun-ok
+
+logger -t srun-ipup "up $1 local=$4 peer=$5 dns=${DNS1:-?},${DNS2:-?}"
+/etc/init.d/dnsmasq reload >/dev/null 2>&1
+exit 0

@@ -4,6 +4,9 @@
 
 提供linux版本，参见/linux文件夹
 
+提供 **OpenWrt 版本**，参见 `/openwrt` 文件夹：`pppd` + `pppoe.so` 拨号、procd 服务、
+开机自启、断线重拨、NTP 校时、DNS 同步、防火墙 NAT 一整套，含 `install.sh` 一键部署。
+
 逆向来源：`srun4-portal-pppoe` 的 `resources/SrunClientEncryptAccount.dll` + `resources/app.asar → electron-preload.js`。
 逻辑是从官方 DLL 直接调参反推出来的，不是猜的。
 
