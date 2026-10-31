@@ -263,6 +263,24 @@ dial|up)
     # 而 tag 用的是本地当日秒数，实测只偏 2~4 分钟就被回 E2531（"User not found"）。
     # 策略：连续失败 3 次后，按 1 分钟一档慢慢试（40 秒一次，最多 ±12 分钟），
     # 试通就用它把系统时钟校正回来。手动指定用 --offset。
+    # 开机先把时钟弄对：这块板子没有 RTC，sysfixtime 是按 /etc 里文件的 mtime 猜的，
+    # 常常差 2~5 分钟，而 tag 只容忍 ±3 分钟 —— 猜错就只能靠下面盲扫（今天拨了 7 次）。
+    # 顺序：① 问局域网校时源（电脑上的 srun-timesync.ps1）
+    #      ② 问不到就用上次认证成功时记下的 epoch（电脑没开机也有得用）
+    if ! /usr/bin/srun-clock.sh --quiet; then
+        if [ -r /etc/srun/lastgood ]; then
+            _lg=$(cat /etc/srun/lastgood 2>/dev/null)
+            case "$_lg" in
+                1[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+                    if [ "$_lg" -gt "$(date +%s)" ]; then
+                        date -s "@$_lg" >/dev/null 2>&1 && \
+                            printf '  按 lastgood 恢复时钟: %s\n' "$(date '+%F %T')"
+                    fi
+                    ;;
+            esac
+        fi
+    fi
+
     off=$OFFSET
     fails=0
     sweep_i=0
@@ -271,6 +289,8 @@ dial|up)
 
     while :; do
         attempt=$(( attempt + 1 ))
+        # 每次拨之前再问一次时间：电脑晚开机也能自愈（2 秒超时，问不到就不动时钟）
+        /usr/bin/srun-clock.sh --quiet
         # tag 每秒都在变 —— 每次重拨必须重新编码
         enc=$(encode_account "$acct" "" "$off")
         offmsg=""
@@ -302,7 +322,9 @@ dial|up)
                 date -s "@$(( $(date +%s) + off ))" >/dev/null 2>&1
                 printf '  已按 %ss 校正系统时钟，现在: %s\n' "$off" "$(date '+%F %T')"
             fi
-            off=$OFFSET; sweeping=0; sweep_i=0; fails=0
+            date +%s > /etc/srun/lastgood 2>/dev/null
+            # 偏移已经落进系统时钟了，这里必须复位成 0：写回 $OFFSET 会让下次拨号再叠加一次
+            off=0; sweeping=0; sweep_i=0; fails=0
             wait "$pppid"; rc=$?
             printf '[%s] 连接断开 rc=%d\n' "$(date '+%F %T')" "$rc"
             [ "$ONCE" = "1" ] && exit "$rc"

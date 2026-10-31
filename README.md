@@ -5,7 +5,11 @@
 提供linux版本，参见/linux文件夹
 
 提供 **OpenWrt 版本**，参见 `/openwrt` 文件夹：`pppd` + `pppoe.so` 拨号、procd 服务、
-开机自启、断线重拨、NTP 校时、DNS 同步、防火墙 NAT 一整套，含 `install.sh` 一键部署。
+开机自启、断线重拨、断线自愈、DNS 同步、防火墙 NAT 一整套，含 `install.sh` 一键部署。
+
+提供 **局域网校时源**，参见 `/windows/timesync.ps1`：路由器没有 RTC，冷启动时时钟靠猜，
+而认证凭据带时间戳（只容忍 ±3 分钟）—— 让路由器拨号前问常开的电脑要时间，第一拨就能过。
+没有可用的电脑时退化成 lastgood + 盲扫。
 
 逆向来源：`srun4-portal-pppoe` 的 `resources/SrunClientEncryptAccount.dll` + `resources/app.asar → electron-preload.js`。
 逻辑是从官方 DLL 直接调参反推出来的，不是猜的。
@@ -15,7 +19,7 @@
 ## 用法
 
 ```powershell
-cd D:\hermes\srun-pppoe
+cd <解压目录>
 
 .\srun.ps1                      # 不带参数 = help
 .\srun.ps1 help                 # 完整帮助

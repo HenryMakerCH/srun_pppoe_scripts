@@ -15,6 +15,7 @@ TZ_SPEC=CST-8                  # POSIX 时区（tag 用本地当日秒数，必�
 TZ_NAME=Asia/Shanghai
 DNS_UPSTREAM=10.1.1.1          # 校园网 DNS；留空则只用服务器下发的
 DOMAIN=stu                     # 账号后缀：stu / teacher / other / none
+TIME_SRC=192.168.1.10:8899     # 局域网校时源 host:port（常开的电脑上跑 windows/timesync.ps1）；留空则不配
 # ----------------------------------------------------
 
 SRC=$(cd "$(dirname "$0")" && pwd)
@@ -24,13 +25,16 @@ SRC=$(cd "$(dirname "$0")" && pwd)
 echo "== 1/7 安装文件"
 install -m 755 "$SRC/srun.sh"      /usr/bin/srun.sh
 install -m 755 "$SRC/srun.init"    /etc/init.d/srun
+install -m 755 "$SRC/srun-clock.sh" /usr/bin/srun-clock.sh
 install -m 755 "$SRC/ppp-ip-up"    /etc/ppp/ip-up
 install -m 755 "$SRC/ppp-ip-down"  /etc/ppp/ip-down
-install -m 755 "$SRC/srun.sh"      /usr/bin/srun.sh
 mkdir -p /etc/srun && chmod 700 /etc/srun
 [ -f /etc/srun/account ] || : > /etc/srun/account
 [ -f /etc/srun/passwd ]  || : > /etc/srun/passwd
 chmod 600 /etc/srun/account /etc/srun/passwd
+if [ -n "$TIME_SRC" ] && [ ! -f /etc/srun/timesync.conf ]; then
+	printf '%s\n' "$TIME_SRC" > /etc/srun/timesync.conf
+fi
 
 echo "== 2/7 检查依赖（ppp + pppoe 插件）"
 if ! command -v pppd >/dev/null 2>&1; then
@@ -70,11 +74,14 @@ else
 fi
 
 echo "== 7/7 开机对时兜底 + 自启"
+# */5 而不是 */1：crond 每个 job 都写一行 cron.err，一分钟一次能把 /var 的日志环冲掉
 grep -q '/etc/srun/timestamp' /etc/crontabs/root 2>/dev/null || {
-	echo '*/1 * * * * touch /etc/srun/timestamp' >> /etc/crontabs/root
+	echo '*/5 * * * * touch /etc/srun/timestamp && date +%s > /etc/srun/lastgood' >> /etc/crontabs/root
 }
 /etc/init.d/cron restart 2>/dev/null || true
 touch /etc/srun/timestamp
+date +%s > /etc/srun/lastgood
+/usr/bin/srun-clock.sh || echo "警告：局域网校时源 $TIME_SRC 连不上，冷启动会退回盲扫"
 /etc/init.d/srun enable
 
 cat <<EOF

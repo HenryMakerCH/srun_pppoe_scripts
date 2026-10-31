@@ -39,11 +39,15 @@ ssh root@192.168.1.1 '/etc/init.d/srun start; /usr/bin/srun.sh status'
 | 文件 | 装到路由器 | 作用 |
 |---|---|---|
 | `srun.sh` | `/usr/bin/srun.sh` | 拨号器本体（编码 + pppd 循环 + 自愈） |
+| `srun-clock.sh` | `/usr/bin/srun-clock.sh` | 拨号前去局域网校时源问一次时间（读 `/etc/srun/timesync.conf`） |
 | `srun.init` | `/etc/init.d/srun` | procd 服务，开机自启 |
 | `ppp-ip-up` | `/etc/ppp/ip-up` | 连上后把 DNS 写进 dnsmasq |
 | `ppp-ip-down` | `/etc/ppp/ip-down` | 断开时**不清空**上游 DNS（防竞态） |
 | `install.sh` | — | 一键部署脚本 |
 | `diag.sh` | — | 手动拨一次并打印完整日志，排障用 |
+
+电脑侧（Windows，常开的那台，见 `../windows/timesync.ps1`）：8899 端口回一行 epoch，
+放启动文件夹随登录自启即可，不需要管理员。
 
 ## 相对 Linux 版改了什么
 
@@ -124,21 +128,34 @@ uci commit system
 
 结论：**容忍窗口大约 ±3 分钟**。所以"重启后能上网"这件事完全取决于开机的时钟猜得准不准。
 
-这块板子没有 RTC，开机时钟由 `sysfixtime` 取 `/etc` 里最新的文件 mtime 得到。三道防线：
+这块板子没有 RTC，开机时钟由 `sysfixtime` 取 `/etc` 里最新的文件 mtime 得到 ——
+所以开机误差 = mtime 的陈旧度（cron 周期 0~5 分钟）+ 关机时长，正好压在 ±3 分钟的边上。
+2026-10-31 实测：这次重启后时钟慢了 180 秒，盲扫到**第 7 次**（+180s）才通过，白等 5 分钟。
+（注意：OpenWrt 的 `reboot` **不会**调用 init 脚本的 `stop`，所以"关机时盖时间戳"无效。）
 
-1. **cron 每分钟 `touch /etc/srun/timestamp`** —— 把"最新 mtime"压在 1 分钟内。
-   （注意：OpenWrt 的 `reboot` **不会**调用 init 脚本的 `stop`，所以"关机时盖时间戳"这种做法无效，
-   只能靠 cron。）
-2. **拨号器自己的时钟扫描**：连续 2 次认证失败后，按 ±1/±2/…/±12 分钟一档、每 30 秒试一次，
-   试通了立刻用这个偏移把系统时钟校正回来（日志里会看到"已按 180s 校正系统时钟"）。
-   偏得不多时 1~2 分钟就能自愈。
-3. 手动兜底：
+四道防线，从上往下依次生效：
+
+1. **局域网校时源（首选）**：路由器和电脑在同一个 LAN，电脑上的 `windows/timesync.ps1`
+   在 8899 端口回一行 Unix epoch；拨号器每次拨之前调 `/usr/bin/srun-clock.sh` 问一次
+   （2 秒超时），偏差 > 5 秒就 `date -s`。实测：把时钟故意拨慢 240 秒 → **第一拨就过**
+   （日志 `LAN sync: delta 242s`）。源地址写在 `/etc/srun/timesync.conf`，一行一个 `host:port`。
+   NTP 帮不上忙：校时必须在拨号*之前*，而 NTP 得等链路通了才有用。
+2. **lastgood 兜底**：每次认证成功、以及 cron 每 5 分钟都把当前 epoch 写进
+   `/etc/srun/lastgood`；电脑没开机时拨号器启动阶段用它恢复时钟（比 mtime 精确）。
+   它最多陈旧 5 分钟，所以只能减少盲扫次数，替代不了 1。
+3. **拨号器自己的时钟扫描**：连续 2 次认证失败后按 ±1/±2/…/±12 分钟、每 30 秒试一档，
+   试通就把偏移落进系统时钟（日志 `已按 180s 校正系统时钟`）。落盘后偏移立刻复位成 0 ——
+   写回 `--offset` 的值会叠加两次（这个 bug 已修）。
+4. 手动兜底：
 
 ```sh
 ssh root@192.168.1.1 "date -s '2026-10-26 23:30:00'; /etc/init.d/srun restart"
 ```
 
-链路一旦通了，NTP 会把时钟彻底校准，之后长时间运行不会再偏。
+链路一旦通了，`sysntpd`（busybox ntpd，在 ujail 里以 ntp 用户跑）会把时钟彻底校准：
+busybox ntpd 的阈值是 `|偏差| ≥ 1 秒` 就 `settimeofday` 硬跳，`< 1 秒` 才 `adjtimex` 微调，
+它不会保留你手动设过的偏移，只认自己算出来的偏差。这条链路上 NTP 是通的（实测
+`ntpd -q -p ntp.aliyun.com` → `offset:+0.213` strat 2/3；`ntp.ntsc.ac.cn` 不通）。
 
 ### 实测：重启后的完整过程
 
