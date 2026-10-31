@@ -41,7 +41,9 @@ ssh root@192.168.1.1 '/etc/init.d/srun start; /usr/bin/srun.sh status'
 | `srun.sh` | `/usr/bin/srun.sh` | 拨号器本体（编码 + pppd 循环 + 自愈） |
 | `srun-clock.sh` | `/usr/bin/srun-clock.sh` | 拨号前去局域网校时源问一次时间（读 `/etc/srun/timesync.conf`） |
 | `srun.init` | `/etc/init.d/srun` | procd 服务，开机自启 |
-| `ppp-ip-up` | `/etc/ppp/ip-up` | 连上后把 DNS 写进 dnsmasq |
+| `v6.sh` | `/etc/srun/v6.sh` | odhcp6c 回调：装 RA 里的全局地址和默认路由（地址没变就静默） |
+| `v6-watchdog.sh` | `/etc/srun/v6-watchdog.sh` | cron 兜底：有 v4 没全局 v6 就重启 odhcp6c |
+| `ppp-ip-up` | `/etc/ppp/ip-up` | 连上后把 DNS 写进 dnsmasq，并起 odhcp6c 收 RA |
 | `ppp-ip-down` | `/etc/ppp/ip-down` | 断开时**不清空**上游 DNS（防竞态） |
 | `install.sh` | — | 一键部署脚本 |
 | `diag.sh` | — | 手动拨一次并打印完整日志，排障用 |
@@ -192,6 +194,25 @@ nslookup www.baidu.com 10.1.1.1         # 直连校园 DNS
 
 手机端如果还显示没有 DNS，让它**关一次 Wi-Fi 再开**（Android 会缓存"无网络"状态）。
 
+## IPv6（BRAS 只发 RA，不应答 DHCPv6）
+
+这个口上 DHCPv6 是哑的（没有 IA_NA / IA_PD），但 RA 里带着一个 on-link `/64` + 默认路由。
+所以不能用 netifd 的 `proto dhcpv6` —— 它会在 setup/teardown 时把 pppd 刚拿到的
+IPv4/IPv6 地址一起 flush，直接断网。实际做法是自己消费 RA：
+
+1. `/etc/ppp/ip-up` 用 `start-stop-daemon -S -q -b -m -p ... -x /usr/sbin/odhcp6c -- -s /etc/srun/v6.sh -f <if>`
+   起单实例。裸 `&` 不行：SSH 会话一断就被 SIGHUP 收走。
+2. `v6.sh` 只装 `RA_ADDRESSES` / `RA_ROUTES`（`${entry%%,*}` 取地址，字段逗号分隔），
+   **先比对现状再动手**：RA 每 ~5 分钟续期一次，地址没变就 `exit 0`——旧版每次都删了重装，
+   既造成短暂断 v6，又每次刷 3 行日志。
+   另外必须守住「没有 RA 数据就什么都不做」，否则手动执行一次会把现网地址删光。
+3. 只删 scope **global**(2)/临时(3) 的地址；`fe80` 是 IPv6CP 协商来的，清了后续 RS/NDP 全失败。
+4. LAN 侧保留 ULA，`masq6=1` + `ra_default=2` —— NAT66，只能出不能进（要说清楚这个限制）。
+5. cron 里的 `v6-watchdog.sh`：PPP 有 v4 但没有全局 v6 就重启 odhcp6c，兜住 RA 丢失。
+
+验证不要只看日志：`ip -6 route get 2400:3200::1` 要显示
+`via fe80::... dev srun src 240e:...`，然后 `ping -6` 通才算数。
+
 ## 保活与自拉起（实测过的四层）
 
 | 层 | 机制 | 触发到恢复的实测值 |
@@ -201,7 +222,22 @@ nslookup www.baidu.com 10.1.1.1         # 直连校园 DNS
 | 3 | procd `respawn 3600 5 0`（无上限） | `kill -9` 脚本 6 次，6 次都被拉起，最终只剩 1 个 pppd 且已连上 |
 | 4 | 认证失败每 10 秒重试；连续 2 次后开始扫时钟偏移 | 重启后遇 `E2531` 会一直重试到通 |
 
-另外：`S95srun` 开机自启；cron 每 5 分钟 `touch /etc/srun/timestamp` 让 `sysfixtime` 开机把时钟猜准。
+另外：`S95srun` 开机自启；cron 每 5 分钟跑**一条**命令干三件事：
+
+```sh
+*/5 * * * * touch /etc/srun/timestamp ; date +%s > /etc/srun/lastgood ; /etc/srun/v6-watchdog.sh
+```
+
+合成一行是有意的：crond 每跑一个 job 就写一行 `cron.err`，拆成两条就是双倍噪音，
+一天几百行，能把 `/var` 那个 1000 行的日志环冲掉 —— 到时候"今天没报错"其实只是
+早上的日志被挤走了。同理频率用 `*/5` 不用 `*/1`。
+
+### 日志里两类"假警报"（都不是故障）
+
+| 日志 | 真相 |
+|---|---|
+| `possible DNS-rebind attack detected: dns.msftncsi.com` / `ip.changeip.com` | 校园 DNS 对 AAAA 查询返回保留地址（`fd3e:4f5a:5b81::1`、`2001:db8::1`），dnsmasq 的反 rebind 保护把它当劫持丢掉。不是攻击。要么忽略，要么 `uci add_list dhcp.@dnsmasq[0].rebind_domain='<域名>'` 加白。 |
+| `srun-ipv6: addr ... / default via ... / update done` | 旧版 `v6.sh` 每次 RA 续期都无条件重装并打 3 行。现在的版本地址没变就完全静默。 |
 
 ### 踩过的两个洞（都已修）
 

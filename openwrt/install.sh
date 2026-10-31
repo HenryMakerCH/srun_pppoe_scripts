@@ -26,6 +26,8 @@ echo "== 1/7 安装文件"
 install -m 755 "$SRC/srun.sh"      /usr/bin/srun.sh
 install -m 755 "$SRC/srun.init"    /etc/init.d/srun
 install -m 755 "$SRC/srun-clock.sh" /usr/bin/srun-clock.sh
+install -m 755 "$SRC/v6.sh"          /etc/srun/v6.sh
+install -m 755 "$SRC/v6-watchdog.sh" /etc/srun/v6-watchdog.sh
 install -m 755 "$SRC/ppp-ip-up"    /etc/ppp/ip-up
 install -m 755 "$SRC/ppp-ip-down"  /etc/ppp/ip-down
 mkdir -p /etc/srun && chmod 700 /etc/srun
@@ -74,10 +76,14 @@ else
 fi
 
 echo "== 7/7 开机对时兜底 + 自启"
-# */5 而不是 */1：crond 每个 job 都写一行 cron.err，一分钟一次能把 /var 的日志环冲掉
-grep -q '/etc/srun/timestamp' /etc/crontabs/root 2>/dev/null || {
-	echo '*/5 * * * * touch /etc/srun/timestamp && date +%s > /etc/srun/lastgood' >> /etc/crontabs/root
-}
+# 三条命令合成一条 cron：crond 每跑一个 job 就写一行 cron.err，分开写是两倍噪音，
+# 一天几百行，能把 /var 那个 1000 行的小日志环冲掉（"今天没报错"可能只是早期日志被挤走了）。
+# 频率也用 */5 不用 */1，理由同上。
+if ! grep -q '/etc/srun/v6-watchdog.sh' /etc/crontabs/root 2>/dev/null; then
+	grep -v -e '/etc/srun/timestamp' -e '/etc/srun/v6-watchdog.sh' /etc/crontabs/root 2>/dev/null > /tmp/cron.new || :
+	echo '*/5 * * * * touch /etc/srun/timestamp ; date +%s > /etc/srun/lastgood ; /etc/srun/v6-watchdog.sh' >> /tmp/cron.new
+	mv /tmp/cron.new /etc/crontabs/root
+fi
 /etc/init.d/cron restart 2>/dev/null || true
 touch /etc/srun/timestamp
 date +%s > /etc/srun/lastgood

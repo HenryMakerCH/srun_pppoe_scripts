@@ -15,4 +15,17 @@ touch /tmp/srun-ok
 
 logger -t srun-ipup "up $1 local=$4 peer=$5 dns=${DNS1:-?},${DNS2:-?}"
 /etc/init.d/dnsmasq reload >/dev/null 2>&1
+
+# ---- IPv6：校园网对 DHCPv6 不应答，只在 RA 里给 /64 + 默认路由 ----
+# 所以用 odhcp6c 的 RA 通道（脚本 /etc/srun/v6.sh 负责装地址和默认路由）。
+# 注意：不能让 netifd 管理这个接口（proto dhcpv6），它会在 setup/teardown 时
+# 把 pppd 刚分配的 IPv4/IPv6 地址一起 flush，直接断网。
+#  2) 必须用 start-stop-daemon 起，裸 `&` 会被 SSH/父进程退出时的 SIGHUP 收走。
+P6=/var/run/srun6.pid
+/sbin/start-stop-daemon -K -q -p "$P6" 2>/dev/null
+rm -f "$P6"
+/sbin/start-stop-daemon -S -q -b -m -p "$P6" -x /usr/sbin/odhcp6c -- -s /etc/srun/v6.sh -f "$1"
+sleep 1
+logger -t srun-ipv6 "odhcp6c started on $1 pid $(cat $P6 2>/dev/null)"
+
 exit 0
