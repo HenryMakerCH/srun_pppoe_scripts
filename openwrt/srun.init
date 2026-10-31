@@ -9,7 +9,7 @@ USE_PROCD=1
 PROG=/usr/bin/srun.sh
 IFACE=wan
 ENTRY=srun
-HOLDOFF=30
+HOLDOFF=10
 
 start_service() {
 	[ -s /etc/srun/passwd ] || {

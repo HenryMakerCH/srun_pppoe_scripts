@@ -30,11 +30,12 @@ PASSFILE=""
 ONCE=0
 DRY=0
 RAW=0
-HOLDOFF=30
+HOLDOFF=10
 MTU=1492
 OFFSET=0
 PIDFILE="/var/run/srun.pid"
 LOGFILE="/var/log/srun.log"
+HIST="/etc/srun/history"   # 跨重启的拨号流水（/var 是内存盘，这里才是能查到"上次怎么炸的"的地方）
 PPPLOG="/var/log/pppd-srun.log"
 
 show_help() {
@@ -81,6 +82,15 @@ EOF
 
 # ---------------------------------------------------------------- 编码
 # 输出: {S4}tag CR LF hex @domain   (含真实 CR LF 字节)
+# 追加一行跨重启的流水；超过 20KB 只留最后 200 行（写 /etc 有 flash 磨损，所以只在事件点写）
+hist() {
+    if [ -f "$HIST" ]; then
+        [ "$(wc -c < "$HIST" 2>/dev/null || echo 0)" -gt 20480 ] &&             tail -n 200 "$HIST" > "$HIST.new" && mv "$HIST.new" "$HIST"
+    fi
+    printf '%s
+' "$*" >> "$HIST" 2>/dev/null
+}
+
 tz_offset() {
     _z=$(date +%z 2>/dev/null || echo +0000)
     case "$_z" in
@@ -268,18 +278,23 @@ dial|up)
     # 顺序：① 问局域网校时源（电脑上的 srun-timesync.ps1）
     #      ② 问不到就用上次认证成功时记下的 epoch（电脑没开机也有得用）
     if ! /usr/bin/srun-clock.sh --quiet; then
+        hist "[nosrc] 局域网校时源不可达 clock=$(date '+%F %T')"
         if [ -r /etc/srun/lastgood ]; then
             _lg=$(cat /etc/srun/lastgood 2>/dev/null)
             case "$_lg" in
                 1[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
                     if [ "$_lg" -gt "$(date +%s)" ]; then
-                        date -s "@$_lg" >/dev/null 2>&1 && \
+                        date -s "@$_lg" >/dev/null 2>&1 && {
                             printf '  按 lastgood 恢复时钟: %s\n' "$(date '+%F %T')"
+                            hist "[lastgood] clock=$(date '+%F %T')"
+                        }
                     fi
                     ;;
             esac
         fi
     fi
+
+    hist "[boot] uptime=$(cut -d. -f1 /proc/uptime)s clock=$(date '+%F %T')"
 
     off=$OFFSET
     fails=0
@@ -322,6 +337,7 @@ dial|up)
                 date -s "@$(( $(date +%s) + off ))" >/dev/null 2>&1
                 printf '  已按 %ss 校正系统时钟，现在: %s\n' "$off" "$(date '+%F %T')"
             fi
+            hist "[ok] tries=$attempt off=${off}s clock=$(date '+%F %T')"
             date +%s > /etc/srun/lastgood 2>/dev/null
             # 偏移已经落进系统时钟了，这里必须复位成 0：写回 $OFFSET 会让下次拨号再叠加一次
             off=0; sweeping=0; sweep_i=0; fails=0
@@ -336,6 +352,7 @@ dial|up)
         wait "$pppid" 2>/dev/null; rc=$?
         fails=$(( fails + 1 ))
         printf '[%s] 拨号失败 rc=%d（连续第 %d 次）\n' "$(date '+%F %T')" "$rc" "$fails"
+        hist "[fail] rc=$rc tries=$attempt off=${off}s clock=$(date '+%F %T')"
         case "$rc" in
             19) printf '  认证被拒：账号/密码错，或时钟偏了（tag 不对），或旧会话没释放\n' ;;
             8)  printf '  PPPoE 发现失败：网线不在校园网口，或还有旧的 pppd 占着会话\n' ;;
@@ -359,11 +376,11 @@ dial|up)
         fi
 
         [ "$ONCE" = "1" ] && exit "$rc"
-        # 退避：扫描时 30 秒一次，否则 30s → 60s → 120s 封顶，别把 BRAS 惹毛
+        # 退避：扫描时 10 秒一次，否则 10s → 20s → 40s 封顶，别把 BRAS 惹毛
         s=$HOLDOFF
-        [ "$sweeping" = "1" ] && s=30
-        [ "$sweeping" = "0" ] && [ "$fails" -ge 3 ] && s=60
-        [ "$sweeping" = "0" ] && [ "$fails" -ge 6 ] && s=120
+        [ "$sweeping" = "1" ] && s=10
+        [ "$sweeping" = "0" ] && [ "$fails" -ge 3 ] && s=20
+        [ "$sweeping" = "0" ] && [ "$fails" -ge 6 ] && s=40
         printf '  %ds 后重试\n' "$s"
         sleep "$s"
     done

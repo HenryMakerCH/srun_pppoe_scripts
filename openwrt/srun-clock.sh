@@ -88,6 +88,8 @@ fi
 if date -s "@$got" >/dev/null 2>&1; then
     say "已按局域网源校时：修正 ${diff}s，现在 $(date '+%F %T')"
     logger -t srun-clock "LAN sync: delta ${diff}s, now $(date '+%F %T')" 2>/dev/null
+    printf '%s
+' "[sync] delta=${diff}s clock=$(date '+%F %T')" >> /etc/srun/history 2>/dev/null
     echo "$got" > /etc/srun/lastgood 2>/dev/null
     exit 0
 fi
