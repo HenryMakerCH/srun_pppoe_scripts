@@ -143,7 +143,8 @@ uci commit system
 2. **lastgood 兜底**：每次认证成功、以及 cron 每 5 分钟都把当前 epoch 写进
    `/etc/srun/lastgood`；电脑没开机时拨号器启动阶段用它恢复时钟（比 mtime 精确）。
    它最多陈旧 5 分钟，所以只能减少盲扫次数，替代不了 1。
-3. **拨号器自己的时钟扫描**：连续 2 次认证失败后按 ±1/±2/…/±12 分钟、每 10 秒试一档，
+3. **拨号器自己的时钟扫描**：连续 2 次认证失败后按 **+1/+2/…/+12 分钟单向**、每 10 秒试一档
+   （没有 RTC 的板子只会「慢」，单向扫比交替 ± 少一半尝试），正向试完再回头试负向，
    试通就把偏移落进系统时钟（日志 `已按 180s 校正系统时钟`）。落盘后偏移立刻复位成 0 ——
    写回 `--offset` 的值会叠加两次（这个 bug 已修）。
 4. 手动兜底：
@@ -151,23 +152,6 @@ uci commit system
 ```sh
 ssh root@192.168.1.1 "date -s '2026-10-26 23:30:00'; /etc/init.d/srun restart"
 ```
-
-### 跨重启的流水：`/etc/srun/history`
-
-`/var` 是内存盘，重启就没了 —— 所以"上次是怎么炸的"没法事后查。拨号器在四个事件点往
-`/etc/srun/history` 追加一行（超过 20 KB 只留最后 200 行）：
-
-```
-[boot]     uptime=621s clock=...          # 起来时系统时钟是多少（uptime 越小说明刚重启）
-[nosrc]    局域网校时源不可达 ...          # 电脑没开/监听没起
-[lastgood] clock=...                      # 用上次的 epoch 兜底
-[sync]     delta=-8s ...                  # 真的改了钟，delta 就是当时差多少
-[fail]     rc=19 tries=3 off=120s ...     # 每次失败带 rc、第几次、当前偏移
-[ok]       tries=1 off=0s ...             # 认证通过
-```
-
-一条 `[boot] uptime=6s` + 紧接着一串 `[fail]` + `[ok] tries=11 off=300s`，就是"重启后时钟
-慢了 5 分钟、又没有校时源、只能盲扫"的标准形状。
 
 链路一旦通了，`sysntpd`（busybox ntpd，在 ujail 里以 ntp 用户跑）会把时钟彻底校准：
 busybox ntpd 的阈值是 `|偏差| ≥ 1 秒` 就 `settimeofday` 硬跳，`< 1 秒` 才 `adjtimex` 微调，

@@ -15,7 +15,7 @@ TZ_SPEC=CST-8                  # POSIX 时区（tag 用本地当日秒数，必�
 TZ_NAME=Asia/Shanghai
 DNS_UPSTREAM=10.1.1.1          # 校园网 DNS；留空则只用服务器下发的
 DOMAIN=stu                     # 账号后缀：stu / teacher / other / none
-TIME_SRC=192.168.1.10:8899     # 局域网校时源 host:port（常开的电脑上跑 windows/timesync.ps1）；留空则不配
+TIME_SRC=192.168.1.10:8899    # 局域网校时源 host:port（电脑上跑 windows/timesync.ps1）；留空则不配
 # ----------------------------------------------------
 
 SRC=$(cd "$(dirname "$0")" && pwd)
